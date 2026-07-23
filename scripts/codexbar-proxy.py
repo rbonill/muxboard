@@ -48,13 +48,32 @@ UPSTREAM_TIMEOUT = float(os.environ.get("MUXBOARD_UPSTREAM_TIMEOUT", "150"))
 CODEXBAR_BIN = os.environ.get("MUXBOARD_CODEXBAR_BIN", "/opt/homebrew/bin/codexbar")
 CLI_TIMEOUT = float(os.environ.get("MUXBOARD_CLI_TIMEOUT", "60"))
 
-# Claude accounts to source from the Claude CLI, one tile each. `config_dir` maps
-# to CLAUDE_CONFIG_DIR (None => the default ~/.claude); `key` is the provider id
-# the tile is shown under. Edit this list to add/rename accounts.
-CLAUDE_CLI_ACCOUNTS = [
-    {"key": "claude", "config_dir": None},
-    {"key": "claude-robocup", "config_dir": os.path.expanduser("~/.claude-robocup")},
-]
+# Claude accounts to source from the Claude CLI, one tile each. Configure via the
+# MUXBOARD_CLAUDE_ACCOUNTS env var (a JSON array of {"key", "config_dir"}); config_dir
+# maps to CLAUDE_CONFIG_DIR (null => the default ~/.claude) and `key` is the provider
+# id the tile is shown under. Defaults to just the default account so the repo stays
+# portable — set per-user accounts in the LaunchAgent's EnvironmentVariables, e.g.
+#   MUXBOARD_CLAUDE_ACCOUNTS = [{"key":"claude","config_dir":null},
+#                               {"key":"claude-work","config_dir":"~/.claude-work"}]
+_DEFAULT_CLAUDE_ACCOUNTS = [{"key": "claude", "config_dir": None}]
+
+
+def _parse_claude_accounts(raw):
+    accounts = []
+    for a in json.loads(raw):
+        cd = a.get("config_dir")
+        accounts.append({"key": a["key"],
+                         "config_dir": os.path.expanduser(cd) if cd else None})
+    return accounts
+
+
+try:
+    _raw_accounts = os.environ.get("MUXBOARD_CLAUDE_ACCOUNTS")
+    CLAUDE_CLI_ACCOUNTS = _parse_claude_accounts(_raw_accounts) if _raw_accounts else _DEFAULT_CLAUDE_ACCOUNTS
+    if not CLAUDE_CLI_ACCOUNTS:
+        raise ValueError("empty account list")
+except Exception:
+    CLAUDE_CLI_ACCOUNTS = _DEFAULT_CLAUDE_ACCOUNTS
 # CodexBar computes Claude /cost from LOCAL Claude Code logs for the DEFAULT
 # (~/.claude) profile only, so cost is attached solely to that account's tile.
 _DEFAULT_CLAUDE_KEY = next((a["key"] for a in CLAUDE_CLI_ACCOUNTS if not a["config_dir"]), None)
@@ -93,7 +112,8 @@ def _claude_account_email(config_dir):
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return (data.get("oauthAccount") or {}).get("emailAddress")
+        email = (data.get("oauthAccount") or {}).get("emailAddress")
+        return email.strip() if isinstance(email, str) and email.strip() else None
     except Exception:
         return None
 
@@ -114,8 +134,8 @@ def _fetch_claude_account(key, config_dir):
     if not isinstance(entry, dict):
         raise ValueError("unexpected codexbar cli output")
     err = entry.get("error")
-    if isinstance(err, dict) and err.get("message"):
-        raise ValueError(err["message"])
+    if err:  # any truthy error payload (dict or bare string) => fall back to last-good
+        raise ValueError(err.get("message") if isinstance(err, dict) else str(err))
     # Re-key so the plugin renders this account as its own tile.
     entry["provider"] = key
     email = _claude_account_email(config_dir)
@@ -127,19 +147,34 @@ def _fetch_claude_account(key, config_dir):
             if not isinstance(ident, dict):
                 ident = {}
                 usage["identity"] = ident
-            ident.setdefault("accountEmail", email)
+            # Authoritative: overwrite any identity email the CLI carried, since
+            # `email` is read from this account's own config dir. The plugin's
+            # accountOf() prefers identity.accountEmail, so setdefault would let a
+            # stale CLI-supplied email win over the correct per-account label.
+            ident["accountEmail"] = email
     return entry
 
 
 def _refresh_once():
-    usage = _fetch_json(f"{UPSTREAM}/usage", UPSTREAM_TIMEOUT)
-    if not isinstance(usage, list):
-        raise ValueError(f"/usage returned non-list: {str(usage)[:120]}")
+    errors = []
 
-    # Replace the upstream (web-sourced, single) Claude entry with one CLI-sourced
-    # entry per configured account. A failing account falls back to last-good so a
-    # transient CLI hiccup doesn't drop its tile.
-    usage = [e for e in usage if _provider_name(e) != "claude"]
+    # Upstream (codex, etc.) is best-effort. On failure keep the last-good non-Claude
+    # entries so those tiles don't vanish. Claude is sourced from the CLI below and
+    # must NOT be gated on the upstream/web path being reachable.
+    try:
+        usage = _fetch_json(f"{UPSTREAM}/usage", UPSTREAM_TIMEOUT)
+        if not isinstance(usage, list):
+            raise ValueError(f"/usage returned non-list: {str(usage)[:120]}")
+    except Exception as e:
+        errors.append(f"upstream /usage: {e}")
+        with _lock:
+            usage = list(_state["usage"]) if _state["usage"] else []
+
+    # Drop any Claude entry (the upstream web-sourced one, or a stale CLI one carried
+    # over from last-good) and (re)source Claude from the CLI, one tile per account.
+    # A failing account falls back to its own last-good so a transient hiccup or a
+    # down upstream doesn't drop its tile.
+    usage = [e for e in usage if not (_provider_name(e) or "").startswith("claude")]
     for acct in CLAUDE_CLI_ACCOUNTS:
         key = acct["key"]
         try:
@@ -147,24 +182,23 @@ def _refresh_once():
             with _lock:
                 _state["claude_cli"][key] = entry
         except Exception as e:
+            errors.append(f"claude[{key}]: {e}")
             with _lock:
-                _state["last_err"] = f"claude[{key}]: {e}"
                 entry = _state["claude_cli"].get(key)
         if entry:
             usage.append(entry)
 
     with _lock:
         _state["usage"] = usage
-    # Per-provider cost (best-effort; individually cached, usually fast). The two
-    # Claude tiles share the upstream `claude` cost series; per-account cost is a
-    # later refinement.
+    # Per-provider cost (best-effort; individually cached, usually fast). CodexBar
+    # computes Claude /cost from LOCAL Claude Code logs for the default (~/.claude)
+    # profile only, so attach it to that tile alone and leave non-default Claude
+    # accounts costless rather than duplicating a wrong figure. (Per-account cost for
+    # non-default profiles is a follow-up.)
     for entry in usage:
         name = _provider_name(entry)
         if not name:
             continue
-        # Claude cost is local to the default profile; give it only to that tile
-        # and leave other Claude accounts costless rather than duplicating a wrong
-        # figure. (Per-account cost for non-default profiles is a follow-up.)
         if name.startswith("claude"):
             if name != _DEFAULT_CLAUDE_KEY:
                 with _lock:
@@ -181,7 +215,7 @@ def _refresh_once():
             pass  # keep prior cost for this provider
     with _lock:
         _state["last_ok"] = time.time()
-        _state["last_err"] = None
+        _state["last_err"] = "; ".join(errors) if errors else None
         _state["refreshes"] += 1
 
 
@@ -220,6 +254,7 @@ class Handler(BaseHTTPRequestHandler):
                 ok = _state["usage"] is not None
                 last_ok = _state["last_ok"]
                 err = _state["last_err"]
+                refreshes = _state["refreshes"]
             # Always report ok so the plugin treats the LCD source as up; the
             # snapshot fields are informational.
             self._send({
@@ -228,6 +263,7 @@ class Handler(BaseHTTPRequestHandler):
                 "warm": ok,
                 "lastOkAgeSec": round(time.time() - last_ok, 1) if last_ok else None,
                 "lastErr": err,
+                "refreshes": refreshes,
             })
             return
 
