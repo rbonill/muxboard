@@ -77,7 +77,10 @@ export function providerIconSvg(
   size: number,
   color: string,
 ): string {
-  const icon = PROVIDER_ICONS[provider.toLowerCase()];
+  const key = provider.toLowerCase();
+  // Alias multi-account provider keys (e.g. "claude-robocup") to their base
+  // provider's glyph so per-account tiles still render the right icon.
+  const icon = PROVIDER_ICONS[key] ?? PROVIDER_ICONS[key.split("-")[0]];
   if (!icon) return "";
   const [minX, minY, vbW, vbH] = icon.viewBox.split(/[\s,]+/).map(Number);
   const s = size / Math.max(vbW || 1, vbH || 1);
