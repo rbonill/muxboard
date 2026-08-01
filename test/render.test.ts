@@ -9,6 +9,7 @@ import {
 } from "../src/core/render/lcdRender.js";
 import type { UsageWindow } from "../src/core/types.js";
 import { formatAge, formatCountdown, formatUsd, shortName } from "../src/core/render/format.js";
+import { providerIconSvg } from "../src/core/render/providerIcons.js";
 import { normalizeUsageResponse } from "../src/core/codexbar/normalize.js";
 import { normalizeNotifications } from "../src/core/cmux/normalize.js";
 import { loadFixture, NOW_MS } from "./helpers.js";
@@ -206,6 +207,46 @@ test("renderLcdSegments shows one provider per segment, all at a glance", () => 
   assert.match(s2, /offline/);
   // empty slot is muted
   assert.match(s3, /—/);
+});
+
+test("commandcode segment: CMDCODE name, single MO gauge, credit footer, no empty weekly", () => {
+  const cc = normalizeUsageResponse(loadFixture("codexbar-usage-commandcode.json"), "commandcode");
+  const [seg] = renderLcdSegments([cc], { nowMs: NOW_MS, stale: false, numberMode: "remaining" });
+  // Friendly header name, not the 8-char-truncated "COMMANDC".
+  assert.match(seg, /CMDCODE/);
+  assert.doesNotMatch(seg, /COMMANDC/);
+  // One gauge for the monthly bucket labeled "MO"; no session "S"/weekly "W" rows.
+  assert.match(seg, />MO</);
+  assert.doesNotMatch(seg, />W</);
+  assert.doesNotMatch(seg, />S</);
+  // Plan + spend/allowance in the footer.
+  assert.match(seg, /Go · \$0\.00 \/ \$10\.00/);
+});
+
+test("perplexity segment: PPLX name, single CR credits gauge, count footer, brand color", () => {
+  const p = normalizeUsageResponse(loadFixture("codexbar-usage-perplexity.json"), "perplexity");
+  const [seg] = renderLcdSegments([p], { nowMs: NOW_MS, stale: false, numberMode: "remaining" });
+  // Friendly name, not the truncated "PERPLEXI".
+  assert.match(seg, /PPLX/);
+  assert.doesNotMatch(seg, /PERPLEXI/);
+  // One credits gauge labeled "CR"; no session/weekly rows.
+  assert.match(seg, />CR</);
+  assert.doesNotMatch(seg, />W</);
+  assert.doesNotMatch(seg, />S</);
+  // Credit-count footer (not dollars) + Perplexity brand color.
+  assert.match(seg, /0 \/ 12000 credits/);
+  assert.match(seg, /#20B8CD/i);
+});
+
+test("providerIconSvg aliases multi-account keys to the base provider glyph", () => {
+  const base = providerIconSvg("claude", 12, 9, 18, "#fff");
+  assert.notEqual(base, "");
+  // A per-account tile id (claude-robocup / claude-work) falls back to the base
+  // provider's glyph instead of rendering blank — regression guard for the
+  // generated providerIconSvg alias.
+  assert.equal(providerIconSvg("claude-robocup", 12, 9, 18, "#fff"), base);
+  // A genuinely unknown provider (no base) still renders nothing.
+  assert.equal(providerIconSvg("totally-unknown", 12, 9, 18, "#fff"), "");
 });
 
 test("the rightmost dial toggles the quota number to the pace delta", () => {

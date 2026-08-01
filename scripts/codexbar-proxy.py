@@ -48,6 +48,15 @@ UPSTREAM_TIMEOUT = float(os.environ.get("MUXBOARD_UPSTREAM_TIMEOUT", "150"))
 CODEXBAR_BIN = os.environ.get("MUXBOARD_CODEXBAR_BIN", "/opt/homebrew/bin/codexbar")
 CLI_TIMEOUT = float(os.environ.get("MUXBOARD_CLI_TIMEOUT", "60"))
 
+# Optional LCD display order. Muxboard renders providers in the array order we
+# return (its allow-list is empty by default), so this is the lever for segment
+# order. Comma-separated provider ids via MUXBOARD_PROVIDER_ORDER: listed ids
+# come first in this order; any others keep their existing (discovery) order.
+# Empty (default) preserves discovery order so the repo stays portable — set the
+# per-user order in the LaunchAgent's EnvironmentVariables, e.g.
+#   MUXBOARD_PROVIDER_ORDER = codex,claude,claude-robocup,commandcode
+_PROVIDER_ORDER = [p.strip() for p in os.environ.get("MUXBOARD_PROVIDER_ORDER", "").split(",") if p.strip()]
+
 # Claude accounts to source from the Claude CLI, one tile each. Configure via the
 # MUXBOARD_CLAUDE_ACCOUNTS env var (a JSON array of {"key", "config_dir"}); config_dir
 # maps to CLAUDE_CONFIG_DIR (null => the default ~/.claude) and `key` is the provider
@@ -97,6 +106,17 @@ def _provider_name(entry):
         return p
     ident = (entry.get("usage") or {}).get("identity") or {}
     return ident.get("providerID")
+
+
+def _apply_provider_order(entries):
+    """Order entries for the LCD per MUXBOARD_PROVIDER_ORDER (stable; unlisted last)."""
+    if not _PROVIDER_ORDER:
+        return entries
+    rank = {}
+    for i, name in enumerate(_PROVIDER_ORDER):
+        rank.setdefault(name, i)  # first occurrence wins if an id is listed twice
+    # sorted() is stable, so providers not in the list keep their relative order.
+    return sorted(entries, key=lambda e: rank.get(_provider_name(e) or "", len(_PROVIDER_ORDER)))
 
 
 def _fetch_json(url, timeout):
@@ -188,6 +208,7 @@ def _refresh_once():
         if entry:
             usage.append(entry)
 
+    usage = _apply_provider_order(usage)
     with _lock:
         _state["usage"] = usage
     # Per-provider cost (best-effort; individually cached, usually fast). CodexBar
