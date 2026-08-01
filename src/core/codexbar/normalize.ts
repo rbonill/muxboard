@@ -185,9 +185,24 @@ function creditModel(src: {
   return undefined;
 }
 
+/**
+ * Provider id from the nested `usage.identity.providerID` (or a top-level
+ * identity), used when CodexBar omits the top-level `provider` field. Mirrors
+ * the proxy's `_provider_name` fallback so Python-side ordering and TS-side
+ * store keying agree on the same id (otherwise such entries collapse to
+ * "unknown" and collide in the store, dropping a tile).
+ */
+function providerIdOf(raw: RawCodexbarUsage): string | undefined {
+  const ident = raw.usage?.identity ?? raw.identity;
+  if (ident && typeof ident === "object") {
+    return str((ident as { providerID?: unknown }).providerID);
+  }
+  return undefined;
+}
+
 /** Normalize one raw CodexBar usage object for a provider. */
 export function normalizeUsage(raw: RawCodexbarUsage, providerHint?: string): ProviderUsage {
-  const provider = str(raw.provider) ?? providerHint ?? "unknown";
+  const provider = str(raw.provider) ?? providerIdOf(raw) ?? providerHint ?? "unknown";
 
   // Error payloads (e.g. expired token) surface as an unavailable provider.
   if (raw.error && typeof raw.error === "object") {
