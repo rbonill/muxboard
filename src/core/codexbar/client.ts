@@ -7,35 +7,49 @@ import {
   type RawCodexbarUsage,
 } from "./normalize.js";
 
-/** Merge the /cost-derived spend + token fields onto a usage object. */
-function withCost(usage: ProviderUsage, cost: unknown): ProviderUsage {
+/** Merge the /cost-derived spend + token fields (for `today`) onto a usage. */
+function withCost(usage: ProviderUsage, cost: unknown, today: string): ProviderUsage {
   return {
     ...usage,
-    costTodayUsd: extractCostToday(cost),
-    tokensToday: extractTokensToday(cost),
+    costTodayUsd: extractCostToday(cost, today),
+    tokensToday: extractTokensToday(cost, today),
   };
 }
 
 /** Pluggable fetch-like fn so the client is testable without a server. */
 export type FetchJson = (url: string) => Promise<unknown>;
 
-const defaultFetchJson: FetchJson = async (url) => {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 4000);
-  try {
-    const res = await fetch(url, { signal: controller.signal });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
-  } finally {
-    clearTimeout(timer);
-  }
-};
+/**
+ * CodexBar's endpoints can be very slow on some builds (the aggregate `/usage`
+ * and even individual providers have been observed at 10-20s+), so the timeout
+ * must be generous or discovery/usage silently aborts and the LCD collapses to
+ * whatever last responded in time. Overridable via CodexbarClientOptions.
+ */
+const DEFAULT_TIMEOUT_MS = 30000;
+
+const makeFetchJson =
+  (timeoutMs: number): FetchJson =>
+  async (url) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } finally {
+      clearTimeout(timer);
+    }
+  };
 
 export interface CodexbarClientOptions {
   /** Base URL of `codexbar serve`. Defaults to http://127.0.0.1:17777. */
   baseUrl?: string;
   /** Injected JSON fetcher for tests. */
   fetchJson?: FetchJson;
+  /** Per-request timeout in ms. CodexBar can be slow; defaults to 30000. */
+  timeoutMs?: number;
+  /** Epoch-ms clock, injectable for tests. Defaults to Date.now. */
+  now?: () => number;
 }
 
 /**
@@ -47,20 +61,20 @@ export interface CodexbarClientOptions {
 export class CodexbarClient {
   private readonly baseUrl: string;
   private readonly fetchJson: FetchJson;
+  private readonly now: () => number;
 
   constructor(opts: CodexbarClientOptions = {}) {
     this.baseUrl = (opts.baseUrl ?? "http://127.0.0.1:17777").replace(/\/+$/, "");
-    this.fetchJson = opts.fetchJson ?? defaultFetchJson;
+    this.fetchJson = opts.fetchJson ?? makeFetchJson(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    this.now = opts.now ?? (() => Date.now());
   }
 
-  /** True when `/health` reports ok. */
-  async health(): Promise<boolean> {
-    try {
-      const body = (await this.fetchJson(`${this.baseUrl}/health`)) as { status?: string };
-      return body?.status === "ok";
-    } catch {
-      return false;
-    }
+  /** Local calendar date (YYYY-MM-DD), matching CodexBar's local daily buckets. */
+  private today(): string {
+    const d = new Date(this.now());
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${d.getFullYear()}-${mm}-${dd}`;
   }
 
   /**
@@ -83,7 +97,7 @@ export class CodexbarClient {
         const cost = await this.fetchJson(
           `${this.baseUrl}/cost?provider=${encodeURIComponent(provider)}`,
         );
-        usage = withCost(usage, cost);
+        usage = withCost(usage, cost, this.today());
       } catch {
         // Cost is optional; ignore failures.
       }
@@ -112,6 +126,7 @@ export class CodexbarClient {
    */
   async getAllUsage(knownProviders: string[] = []): Promise<ProviderUsage[]> {
     let raw: unknown;
+    const today = this.today();
     try {
       raw = await this.fetchJson(`${this.baseUrl}/usage`);
     } catch {
@@ -132,7 +147,7 @@ export class CodexbarClient {
           const cost = await this.fetchJson(
             `${this.baseUrl}/cost?provider=${encodeURIComponent(u.provider)}`,
           );
-          usages[i] = withCost(u, cost);
+          usages[i] = withCost(u, cost, today);
         } catch {
           // Cost is optional.
         }
