@@ -78,6 +78,29 @@ test("perplexity: gauges the credits window, skips the empty bonus, count unit",
   assert.equal(u.credits?.unit, "credits");
 });
 
+test("perplexity: a bonus-only (0/0) account stays credit-framed, not a weekly cap", () => {
+  const u = normalizeUsageResponse(
+    [
+      {
+        provider: "perplexity",
+        usage: {
+          primary: null,
+          secondary: { usedPercent: 100, resetDescription: "0/0 bonus" },
+          identity: { providerID: "perplexity" },
+        },
+      },
+    ],
+    "perplexity",
+  );
+  assert.equal(u.ok, true);
+  // No purchased credits — only a 0/0 bonus — must NOT fall back to the S/W layout
+  // (which would render a misleading fully-used weekly bar).
+  assert.equal(u.weekly, undefined);
+  assert.ok(u.session);
+  assert.equal(u.credits?.total, 0);
+  assert.equal(u.credits?.unit, "bonus");
+});
+
 test("normalizes nested usage when primary is null but secondary is live", () => {
   // Real Codex shape from newer CodexBar builds: windows nest under `usage`,
   // the 5h `primary` is null, and only the weekly `secondary` is present. The

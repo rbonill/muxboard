@@ -148,10 +148,15 @@ function loginMethodOf(src: {
  * spend against an allowance, shown as one gauge + a footer. Returns the gauge
  * window + bucket, or undefined for ordinary rate-limit providers.
  *
+ * Dispatch is by data SHAPE, not provider id: any provider whose `loginMethod`
+ * is "<plan> · $x of $y", or that has a window described "<spent>/<total> <unit>",
+ * is treated as credit-metered. Real rate-limit payloads don't match either form
+ * (reset descriptions start with a letter, e.g. "Aug 6 at 07:14").
+ *
  * CommandCode: dollars from `loginMethod`, gauge = the monthly `primary` window.
- * Perplexity: a window described "<spent>/<total> <unit>"; pick the one with the
- * largest non-zero allowance as the gauge (so the empty "0/0 bonus" is skipped
- * in favor of the real "0/12000 credits").
+ * Perplexity: pick the window with the largest allowance as the gauge — the real
+ * "0/12000 credits" beats an empty "0/0 bonus", and an account carrying only a
+ * "0/0 bonus" still renders credit-framed rather than as a misleading weekly cap.
  */
 function creditModel(src: {
   primary?: RawWindow;
@@ -165,8 +170,10 @@ function creditModel(src: {
 
   const candidates = [src.primary, src.secondary, src.tertiary]
     .map((w) => ({ w, b: parseCountBucket(w?.resetDescription) }))
-    .filter((c): c is { w: RawWindow; b: CreditBucket } => !!c.b && c.b.total > 0);
+    .filter((c): c is { w: RawWindow; b: CreditBucket } => !!c.b);
   if (candidates.length > 0) {
+    // Largest allowance wins (stable sort → earliest window on a tie), so a real
+    // purchased bucket beats an empty bonus; a zero-only account still qualifies.
     candidates.sort((a, b) => b.b.total - a.b.total);
     const top = candidates[0];
     return { session: normalizeWindow(top.w), credits: top.b };
