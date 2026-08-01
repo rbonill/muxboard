@@ -124,6 +124,10 @@ function parseUsdBucket(loginMethod: unknown): CreditBucket | undefined {
 function parseCountBucket(resetDescription: unknown): CreditBucket | undefined {
   const s = str(resetDescription);
   if (!s) return undefined;
+  // "<spent>/<total> <unit>", leading-digit anchored. Real reset descriptions are
+  // month-name dates ("Aug 6 at 07:14") that start with a letter and never match;
+  // only credit descriptions take this shape. (A numeric-locale date like "6/20 PM"
+  // would false-match, but CodexBar doesn't emit those.)
   const m = /^(\d[\d,]*)\s*\/\s*(\d[\d,]*)\s+([A-Za-z]+)$/.exec(s);
   if (!m) return undefined;
   const spent = Number(m[1].replace(/,/g, ""));
