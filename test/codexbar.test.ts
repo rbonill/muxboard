@@ -263,3 +263,101 @@ test("CodexbarClient.getUsage never throws on transport failure", async () => {
   assert.equal(u.ok, false);
   assert.match(u.error ?? "", /ECONNREFUSED/);
 });
+
+test("perplexity: a fully-spent recurring grant keeps its own numbers, not an empty pool", () => {
+  // CodexBar always emits secondary+tertiary and encodes a drained pool as
+  // usedPercent 100, so an availability-first policy must not let a 0/0 bucket win.
+  const u = normalizeUsageResponse(
+    [
+      {
+        provider: "perplexity",
+        usage: {
+          primary: { usedPercent: 100, resetDescription: "1000/1000 credits" },
+          secondary: { usedPercent: 100, resetDescription: "0/0 bonus" },
+          tertiary: { usedPercent: 100, resetDescription: "0/0 credits" },
+        },
+      },
+    ],
+    "perplexity",
+  );
+  assert.equal(u.credits?.spent, 1000);
+  assert.equal(u.credits?.total, 1000);
+  assert.equal(u.credits?.unit, "credits");
+});
+
+test("perplexity: an available purchased pool wins once the recurring grant is spent", () => {
+  const u = normalizeUsageResponse(
+    [
+      {
+        provider: "perplexity",
+        usage: {
+          primary: { usedPercent: 100, resetDescription: "1000/1000 credits" },
+          secondary: { usedPercent: 100, resetDescription: "0/0 bonus" },
+          tertiary: { usedPercent: 25, resetDescription: "3000/12000 credits" },
+        },
+      },
+    ],
+    "perplexity",
+  );
+  assert.equal(u.session?.usedPercent, 25);
+  assert.equal(u.credits?.total, 12000);
+});
+
+test("perplexity: purchased credit outranks promotional when both are available", () => {
+  // Pins the tertiary-before-secondary order (CodexBar's recurring → purchased →
+  // promotional attribution); nothing else would catch a swap.
+  const u = normalizeUsageResponse(
+    [
+      {
+        provider: "perplexity",
+        usage: {
+          primary: null,
+          secondary: { usedPercent: 0, resetDescription: "0/100 bonus" },
+          tertiary: { usedPercent: 0, resetDescription: "0/12000 credits" },
+        },
+      },
+    ],
+    "perplexity",
+  );
+  assert.equal(u.credits?.total, 12000);
+  assert.equal(u.credits?.unit, "credits");
+});
+
+test("credit parsing stays scoped to CommandCode and Perplexity", () => {
+  // Alibaba describes all three rate-limit windows "<used> / <total> used"
+  // (AlibabaCodingPlanUsageSnapshot.usageDetail) — shape dispatch would collapse
+  // its S/W pair into a bogus single credit gauge.
+  const alibaba = normalizeUsageResponse(
+    [
+      {
+        provider: "alibaba",
+        usage: {
+          primary: { usedPercent: 20, windowMinutes: 300, resetDescription: "20 / 100 used" },
+          secondary: { usedPercent: 30, windowMinutes: 10080, resetDescription: "300 / 1000 used" },
+        },
+      },
+    ],
+    "alibaba",
+  );
+  assert.equal(alibaba.credits, undefined);
+  assert.equal(alibaba.session?.usedPercent, 20);
+  assert.equal(alibaba.weekly?.usedPercent, 30);
+
+  // Kilo emits "<used>/<total> credits" (KiloUsageFetcher) — byte-identical in
+  // shape to Perplexity's string, so only the provider id can separate them.
+  const kilo = normalizeUsageResponse(
+    [
+      {
+        provider: "kilo",
+        usage: {
+          primary: { usedPercent: 10, resetDescription: "100/1000 credits" },
+          secondary: { usedPercent: 50, resetDescription: "$5.00 / $10.00" },
+        },
+      },
+    ],
+    "kilo",
+  );
+  assert.equal(kilo.credits, undefined);
+  assert.equal(kilo.session?.usedPercent, 10);
+  assert.equal(kilo.weekly?.usedPercent, 50);
+});
