@@ -112,7 +112,9 @@ def _apply_provider_order(entries):
     """Order entries for the LCD per MUXBOARD_PROVIDER_ORDER (stable; unlisted last)."""
     if not _PROVIDER_ORDER:
         return entries
-    rank = {name: i for i, name in enumerate(_PROVIDER_ORDER)}
+    rank = {}
+    for i, name in enumerate(_PROVIDER_ORDER):
+        rank.setdefault(name, i)  # first occurrence wins if an id is listed twice
     # sorted() is stable, so providers not in the list keep their relative order.
     return sorted(entries, key=lambda e: rank.get(_provider_name(e) or "", len(_PROVIDER_ORDER)))
 
