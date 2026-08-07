@@ -53,7 +53,12 @@ const PROVIDER_COLORS: Record<string, string> = {
 
 /** Brand color for a CodexBar provider; neutral grey for unknown providers. */
 export function providerColor(provider: string): string {
-  return PROVIDER_COLORS[provider.toLowerCase()] ?? "#9aa0aa";
+  const key = provider.toLowerCase();
+  // Alias multi-account provider keys (e.g. "claude-robocup") to their base
+  // provider's brand color, mirroring providerIconSvg's glyph aliasing — a
+  // per-account tile otherwise drew the right glyph on the neutral grey.
+  // Exact match wins first, so a genuinely hyphenated id ("kimi-k2") is safe.
+  return PROVIDER_COLORS[key] ?? PROVIDER_COLORS[key.split("-")[0]] ?? "#9aa0aa";
 }
 
 /** Status color ramp for CodexBar usage bars (more used → hotter). */

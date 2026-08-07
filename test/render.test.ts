@@ -325,6 +325,20 @@ test("credit footers mirror CodexBar's own USD formatting", () => {
   assert.match(seg2, /Go · \$0\.00 \/ \$10\.00/);
 });
 
+test("providerColor aliases multi-account keys to the base provider color", async () => {
+  const { providerColor } = await import("../src/core/render/palette.js");
+  const base = providerColor("claude");
+  assert.notEqual(base, "#9aa0aa"); // claude has a real brand color
+  // A per-account tile id gets the base provider's brand color instead of the
+  // neutral grey, matching the glyph aliasing above.
+  assert.equal(providerColor("claude-robocup"), base);
+  // An exact hyphenated key still wins over the base-prefix fallback.
+  assert.equal(providerColor("kimi-k2"), providerColor("KIMI-K2"));
+  assert.notEqual(providerColor("kimi-k2"), providerColor("kimi"));
+  // A genuinely unknown provider still gets the neutral grey.
+  assert.equal(providerColor("totally-unknown"), "#9aa0aa");
+});
+
 test("providerIconSvg aliases multi-account keys to the base provider glyph", () => {
   const base = providerIconSvg("claude", 12, 9, 18, "#fff");
   assert.notEqual(base, "");
