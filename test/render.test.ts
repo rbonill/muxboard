@@ -9,6 +9,7 @@ import {
 } from "../src/core/render/lcdRender.js";
 import type { UsageWindow } from "../src/core/types.js";
 import { formatAge, formatCountdown, formatUsd } from "../src/core/render/format.js";
+import { providerIconSvg } from "../src/core/render/providerIcons.js";
 import { normalizeUsageResponse } from "../src/core/codexbar/normalize.js";
 import { normalizeNotifications } from "../src/core/cmux/normalize.js";
 import { loadFixture, NOW_MS } from "./helpers.js";
@@ -322,4 +323,15 @@ test("credit footers mirror CodexBar's own USD formatting", () => {
   const small = normalizeUsageResponse(loadFixture("codexbar-usage-commandcode.json"), "commandcode");
   const [seg2] = renderLcdSegments([small], { nowMs: NOW_MS, stale: false, numberMode: "remaining" });
   assert.match(seg2, /Go · \$0\.00 \/ \$10\.00/);
+});
+
+test("providerIconSvg aliases multi-account keys to the base provider glyph", () => {
+  const base = providerIconSvg("claude", 12, 9, 18, "#fff");
+  assert.notEqual(base, "");
+  // A per-account tile id (claude-robocup / claude-work) falls back to the base
+  // provider's glyph instead of rendering blank — regression guard for the
+  // fork's multi-account Claude tiles.
+  assert.equal(providerIconSvg("claude-robocup", 12, 9, 18, "#fff"), base);
+  // A genuinely unknown provider (no base) still renders nothing.
+  assert.equal(providerIconSvg("totally-unknown", 12, 9, 18, "#fff"), "");
 });

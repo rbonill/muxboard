@@ -531,3 +531,18 @@ test("commandcode: v0.47.0 payloads still gauge the grant from `primary`", () =>
   assert.equal(u.weekly, undefined);
   assert.equal(u.credits?.spent, 0.09);
 });
+
+test("provider id falls back to nested usage.identity.providerID (aggregate path)", () => {
+  // getAllUsage normalizes with no providerHint; an entry lacking a top-level
+  // `provider` must still be keyed by its nested id (matching the proxy's
+  // _provider_name), not collapse to "unknown" and collide in the store.
+  const u = normalizeUsageResponse([
+    {
+      usage: {
+        identity: { providerID: "perplexity" },
+        tertiary: { usedPercent: 0, resetDescription: "0/12000 credits" },
+      },
+    },
+  ]);
+  assert.equal(u.provider, "perplexity");
+});

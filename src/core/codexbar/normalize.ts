@@ -17,7 +17,7 @@ interface WindowSource {
   secondary?: RawWindow;
   tertiary?: RawWindow;
   /** Some providers carry the account/credit fields one level down. */
-  identity?: { accountEmail?: unknown; loginMethod?: unknown };
+  identity?: { accountEmail?: unknown; loginMethod?: unknown; providerID?: unknown };
   /** Credit summary string (e.g. CommandCode "Go · $0.00 of $10.00"). */
   loginMethod?: unknown;
   updatedAt?: unknown;
@@ -179,9 +179,21 @@ function creditModel(
   return pools.find((pool) => pool.session.remainingPercent > 0) ?? pools[0];
 }
 
+/**
+ * Provider id from the nested `usage.identity.providerID` (or a top-level
+ * identity), used when CodexBar omits the top-level `provider` field. Mirrors
+ * the proxy's `_provider_name` fallback so Python-side ordering and TS-side
+ * store keying agree on the same id (otherwise such entries collapse to
+ * "unknown" and collide in the store, dropping a tile).
+ */
+function providerIdOf(raw: RawCodexbarUsage): string | undefined {
+  const ident = raw.usage?.identity ?? raw.identity;
+  return ident && typeof ident === "object" ? str(ident.providerID) : undefined;
+}
+
 /** Normalize one raw CodexBar usage object for a provider. */
 export function normalizeUsage(raw: RawCodexbarUsage, providerHint?: string): ProviderUsage {
-  const provider = str(raw.provider) ?? providerHint ?? "unknown";
+  const provider = str(raw.provider) ?? providerIdOf(raw) ?? providerHint ?? "unknown";
 
   // Error payloads (e.g. expired token) surface as an unavailable provider.
   if (raw.error && typeof raw.error === "object") {

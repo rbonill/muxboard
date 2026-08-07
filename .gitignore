@@ -9,3 +9,7 @@ out/
 .streamDeck/
 *.tgz
 *.streamDeckPlugin
+
+# Python bytecode from scripts/codexbar-proxy.py (run in place via symlink)
+__pycache__/
+*.pyc
