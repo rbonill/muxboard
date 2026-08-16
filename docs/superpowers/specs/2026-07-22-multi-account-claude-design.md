@@ -61,7 +61,13 @@ after the first `-` and reuses that glyph if it maps to a known provider).
   later refinement.
 - Codex is unchanged (still web-sourced); moving it off the browser is future work.
 - `setup.sh` could be wired to install `scripts/codexbar-proxy.py` and its
-  LaunchAgent (currently the proxy is installed out-of-band).
+  LaunchAgent (currently the proxy is installed out-of-band). Partially
+  mitigated: `scripts/codexbar-proxy.launchagent.plist.sample` is a documented
+  template of that agent, so the configuration is reproducible by hand. It
+  matters because the agent's `EnvironmentVariables` are the *only* home for the
+  account list and the LCD segment order (`MUXBOARD_PROVIDER_ORDER`) — nothing
+  in the repo or the plugin settings records them, so a machine rebuild loses
+  both silently.
 
 ## Status
 
