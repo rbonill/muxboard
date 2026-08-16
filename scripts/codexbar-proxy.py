@@ -54,7 +54,9 @@ CLI_TIMEOUT = float(os.environ.get("MUXBOARD_CLI_TIMEOUT", "60"))
 # come first in this order; any others keep their existing (discovery) order.
 # Empty (default) preserves discovery order so the repo stays portable — set the
 # per-user order in the LaunchAgent's EnvironmentVariables, e.g.
-#   MUXBOARD_PROVIDER_ORDER = codex,claude,claude-robocup,commandcode
+#   MUXBOARD_PROVIDER_ORDER = codex,claude,claude-robocup,commandcode,perplexity
+# That agent is the only place the order lives; see
+# scripts/codexbar-proxy.launchagent.plist.sample to reproduce one.
 _PROVIDER_ORDER = [p.strip() for p in os.environ.get("MUXBOARD_PROVIDER_ORDER", "").split(",") if p.strip()]
 
 # Claude accounts to source from the Claude CLI, one tile each. Configure via the

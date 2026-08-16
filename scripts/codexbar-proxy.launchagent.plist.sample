@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Sample LaunchAgent for the muxboard CodexBar caching proxy
+  (scripts/codexbar-proxy.py). The proxy is installed out-of-band, so without
+  this template a machine rebuild silently loses the whole configuration —
+  ports, Claude accounts, and LCD segment order alike.
+
+  Install:
+    cp scripts/codexbar-proxy.py ~/Library/Application\ Support/muxboard/
+    cp scripts/codexbar-proxy.launchagent.plist.sample \
+       ~/Library/LaunchAgents/com.mrshu.muxboard.codexbar-proxy.plist
+    # edit the EnvironmentVariables below, then:
+    launchctl bootstrap gui/$(id -u) \
+       ~/Library/LaunchAgents/com.mrshu.muxboard.codexbar-proxy.plist
+
+  Reload after editing (bootout then bootstrap; a plain `kickstart` keeps the
+  old environment):
+    launchctl bootout   gui/$(id -u)/com.mrshu.muxboard.codexbar-proxy
+    launchctl bootstrap gui/$(id -u) \
+       ~/Library/LaunchAgents/com.mrshu.muxboard.codexbar-proxy.plist
+
+  This pairs with the upstream keep-alive for `codexbar serve` itself
+  (scripts/install-codexbar-agent.sh), which must listen on
+  MUXBOARD_UPSTREAM_PORT rather than the port muxboard polls.
+
+  Every variable below is optional; the defaults shown are the ones baked into
+  codexbar-proxy.py. Replace USERNAME with your own short name.
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.mrshu.muxboard.codexbar-proxy</string>
+
+	<key>ProgramArguments</key>
+	<array>
+		<string>/opt/homebrew/bin/python3</string>
+		<string>/Users/USERNAME/Library/Application Support/muxboard/codexbar-proxy.py</string>
+	</array>
+
+	<key>EnvironmentVariables</key>
+	<dict>
+		<!-- Port muxboard polls; must match the plugin's `codexbarBaseUrl`. -->
+		<key>MUXBOARD_PROXY_PORT</key>
+		<string>17777</string>
+
+		<!-- Port the real `codexbar serve` listens on. Keep these distinct:
+		     the proxy sits in front of CodexBar, it does not replace it. -->
+		<key>MUXBOARD_UPSTREAM_PORT</key>
+		<string>17778</string>
+
+		<!-- Background refresh cadence, seconds. The proxy answers instantly
+		     from its last-good snapshot, so a fix upstream can take up to this
+		     long to appear on the LCD — check :17778 before concluding that a
+		     provider is still broken. -->
+		<key>MUXBOARD_PROXY_REFRESH</key>
+		<string>45</string>
+
+		<!-- How long to wait on a cold `codexbar serve` (it blocks during a
+		     refetch). Generous on purpose; it never reaches the plugin. -->
+		<key>MUXBOARD_UPSTREAM_TIMEOUT</key>
+		<string>150</string>
+
+		<!-- LCD segment order, left to right. Listed ids come first in this
+		     order; anything else keeps its discovery order. This is the only
+		     place the order lives, which is why this file is worth keeping. -->
+		<key>MUXBOARD_PROVIDER_ORDER</key>
+		<string>codex,claude,claude-robocup,commandcode,perplexity</string>
+
+		<!-- Claude accounts to source from the Claude CLI, one tile each.
+		     `config_dir` maps to CLAUDE_CONFIG_DIR (null = default ~/.claude);
+		     `key` becomes the provider id, so it must also appear in
+		     MUXBOARD_PROVIDER_ORDER above to be positioned. -->
+		<key>MUXBOARD_CLAUDE_ACCOUNTS</key>
+		<string>[{"key":"claude","config_dir":null},{"key":"claude-robocup","config_dir":"~/.claude-robocup"}]</string>
+
+		<!-- Full path: launchd's PATH is minimal and will not find `codexbar`. -->
+		<key>MUXBOARD_CODEXBAR_BIN</key>
+		<string>/opt/homebrew/bin/codexbar</string>
+
+		<key>MUXBOARD_CLI_TIMEOUT</key>
+		<string>60</string>
+	</dict>
+
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>ProcessType</key>
+	<string>Background</string>
+
+	<key>StandardOutPath</key>
+	<string>/Users/USERNAME/Library/Logs/muxboard-codexbar-proxy.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/USERNAME/Library/Logs/muxboard-codexbar-proxy.log</string>
+</dict>
+</plist>
