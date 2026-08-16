@@ -345,20 +345,33 @@ plan describes each of its windows `"<used> / <total> used"`, and Kilo emits
 `"<used>/<total> credits"`, which is indistinguishable from Perplexity's. Shape
 dispatch would silently replace those providers' session/weekly gauges.
 
-CommandCode authenticates only intermittently, for a reason upstream of muxboard
-([steipete/CodexBar#2541](https://github.com/steipete/CodexBar/issues/2541)): an
-automatic refresh reports "Command Code session cookie not found" while a manual
-refresh in the CodexBar menu succeeds seconds later and returns real data, so the
-non-interactive path isn't reading the browser cookie store. Muxboard renders the
-provider as unavailable whenever that happens, and the tile populates on its own
+CommandCode needs an interactive cookie refresh, for reasons upstream of
+muxboard. Its session is imported from the browser, and only an interactive
+process — the CodexBar app, or the CLI run with `--allow-keychain-prompt` — can
+prompt for the Keychain access that decryption needs. Unattended, `codexbar
+serve` declines that path (`cookie refresh` returns `status: "blocked"`) and
+falls back to its last saved session. So the menu bar can show live numbers
+while `serve` reports "Command Code session is invalid or expired"; the two are
+reading different things. Recover with an interactive
+`codexbar cookie refresh --provider commandcode --allow-keychain-prompt`.
+Through CodexBar v0.46.0 even that failed to persist
+([steipete/CodexBar#2541](https://github.com/steipete/CodexBar/issues/2541)); on
+0.50.0 it has been observed to save and `serve` to return live data. Muxboard
+renders the provider as unavailable meanwhile, and the tile populates on its own
 once CodexBar holds a session; it is a pure consumer of `codexbar serve` and has
 no cookie configuration of its own.
 
-Perplexity's automatic import can also drop out transiently — `codexbar serve`
-answers `{"code":1,"message":"No available fetch strategy for perplexity"}` when
-no session cookie is currently resolvable, which a refresh in the CodexBar UI
-clears. Muxboard renders that as an unavailable provider; it cannot trigger a
-CodexBar refresh, since `serve` exposes no such endpoint.
+Perplexity has two observed failure modes, told apart by the message. Its
+automatic import drops out transiently — `codexbar serve` answers
+`{"code":1,"message":"No available fetch strategy for perplexity"}` when no
+session cookie is currently resolvable, which a refresh in the CodexBar UI
+clears. Separately, Perplexity rate-limits the account itself: `serve` returns
+`Perplexity API error: HTTP 429` (`RATE_LIMITED`) with a perfectly good cookie.
+A refresh does not clear that one, it can recur for days, and it is usually
+intermittent rather than total — so the tile alternates between real credits and
+unavailable depending on which poll lands. Muxboard renders either failure as an
+unavailable provider; it cannot trigger a CodexBar refresh, since `serve`
+exposes no such endpoint.
 
 The pace marker/number is derived locally from `resetsAt` + `windowMinutes`
 (elapsed-vs-used); windows with no time bounds (e.g. an "Unlimited" weekly) show
